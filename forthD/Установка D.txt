@@ -1,0 +1,48 @@
+                 Установка и настройка D в Windows 32
+                 ------------------------------------
+Внимание: все устанавливаемые программы не будут влиять на
+уже установленные компиляторы типа MSVC, mingw и т.д.
+                 
+1 - Скачиваем дистрибутив с сайта dlang.org
+http://downloads.dlang.org/releases/2.x/2.067.1/dmd.2.067.1.windows.zip
+
+2 - Разварачиваем архив, например на C:\dmd2 (можно в любое место)
+
+3 - Скачиваем компилятор С++ 
+http://ftp.digitalmars.com/Digital_Mars_C++/Patch/dm857c.zip
+
+4 - Развернем dm857c.zip в каталог C:\dmd2, что бы каталог dm был
+    внутри папки C:\dmd2
+    
+3 - В каталоге C:\dmd2 содаем командный файл: setvar.bat
+    со следующей строкой:
+PATH=c:\dmd2\windows\bin;c:\dmd2\dm\bin;C:\windows\system32;C:\windows;
+
+4 - Открываем окно DOS, переходим в каталог C:\dmd2 и выполняем файл    
+    setvar.bat С этого момента в данном окне у нас установлены компиляторы
+    D и C++ фирмы Digital Mars.
+    
+5 - Запуск компиляторов:
+    dmd - D
+    dmc - C++
+    
+6 - Создаём каталог проекта. У меня C:\qte и переходим в него.
+
+7 - Развернем в него исходники Форта:
+    forth.d       - сам Форт 
+    asc1251.d     - перекодировка utf8 <--> 1251 <--> 866
+    dllmain.d     - Точка входа для DLL
+    forthdll.def  - для линковки DLL
+    forthdll.d    - обертки для вызовов
+    stdlib.f      - динамическая загрузка библиотек
+    f2.f          - тестовая форт программа
+    testForth.cpp - Проверка форта на C++
+
+8 - Сборка DLL с Фортом
+dmd -offorthd.dll -L/IMPLIB forth.d dllmain.d forthdll.d forthdll.def
+
+9 - Сборка testForth.cpp
+dmc testForth.cpp
+
+10 - Запуск теста
+testForth f2.f
