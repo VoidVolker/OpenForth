@@ -1364,6 +1364,24 @@ void f_TYPE() {
 		ret;
 	}
 }
+
+// CMOVE ( Afrom Ato N -- ) Скопировать байты
+private void h_bmove(int n, ps to, ps from) {
+	import core.stdc.string : memcpy;
+	memcpy(to, from, n);
+}
+private void f_bmove() {
+	asm {	naked;
+		push EAX;
+		call h_DROP;
+		push EAX;
+		call h_DROP;
+		call h_bmove;
+		call h_DROP;
+		ret;
+	}
+}
+
 // Странное слово. Понятно, что вызывается, когда есть ветка с исключительной
 // ситуацией. По идее, должно проинформировать и корректно прервать 
 // программу
@@ -1426,49 +1444,9 @@ extern (C) pp executeForth(pp adrexec, ubyte kolPar, ...) {
 
 	return ret;
 }
-// Выполнить Forth строку
-void evalForth2(string str) {
-    // Linux корректировка
-printf("--201--");  
-    if(str.length>0 && str[$-1]==13) str.length = str.length-1;
-printf("--202--");  
-    gpcb.dlTib = str.length;        // Запишем длину строки в gpcb
-    gpcb.In = cast(ps)gpcb.Tib;     // указатель смещения во входном буфере
-    for(int i; i != str.length; i++) tib[i] = cast(ubyte)str[i];
-    NPcb npcb = gpcb;   // Возможность работы с PCB (контекст) переменными в ASM
-printf("--203--");  
-    printf("\nnpcb.saveEAX = %d", npcb.saveEAX);
-    printf("\nnpcb.saveESI = %d", npcb.saveESI);
-    printf("\nnpcb.saveEDI = %d", npcb.saveEDI);
-    printf("\nnpcb.saveEBP = %d", npcb.saveEBP);
 
-    asm {
-        align 4;
-        // Сохраним регистры D
-        push EBX; push ESI; push EAX; push ECX; push EDX; push EBP; 
-        // --------------------
-        // Востановим регитры F
-//      int 3;
-        mov EAX, npcb.saveEAX.offsetof[npcb];
-        mov ESI, npcb.saveESI.offsetof[npcb];
-        mov EDI, npcb.saveEDI.offsetof[npcb];
-        mov EBP, npcb.saveEBP.offsetof[npcb];
-        
-        call f_inter;
-        
-        // Сохраним F
-        mov ECX, EBP;
-        pop EBP;
-        mov npcb.saveEAX.offsetof[npcb], EAX;
-        mov npcb.saveEBP.offsetof[npcb], ECX;  // Сохраним запомненный EBP
-        mov npcb.saveESI.offsetof[npcb], ESI;
-        mov npcb.saveEDI.offsetof[npcb], EDI;
-        // ----------------------
-        // Восстановим регистры D
-        pop EDX; pop ECX; pop EAX; pop ESI; pop EBX;
-    }
-printf("--204--");  
-
+void evalForth(char *str) {
+	evalForth(to!string(str));
 }
 
 void evalForth(string str) {
@@ -1514,194 +1492,6 @@ void setCommonAdr(int n, pp adr) {	commonTable[n] = adr; }
 // Прочитать из общий таблицы адрес в ячейке n
 pp getCommonAdr(int n) {	return commonTable[n];  }
 // Инициализировать Forth и подготовить его к работе
-
-void initForth2() {
-printf("--100--");
-    kdf = cast(pb)(new uint[100000]).ptr;        // Изготовим кодофайл на 10000 адр
-printf("--101--");
-    NPcb npcb = gpcb;
-printf("--102--");
-    npcb.adrCommonTable = cast(pp)commonTable.ptr;
-printf("--103--");
-    const sizeSt = 1000;                    // По 1000 CELL на каждый стек
-    // uint[sizeSt] stSD, stSR, stSL;       // Память под стеки
-    stSD = cast(pp)(new uint[sizeSt]);      // Запомнить начало области SP в глобальной переменной
-    npcb.csd = stSD + sizeSt - 1;           // Запомнить вершину стека SP в контексте
-    
-    // npcb.csr = cast(pp)stSR[sizeSt-1]; ---> Совмещен со стеком D
-    stSL = cast(pp)(new uint[sizeSt]);      // Запомнить начало SP в глобальной переменной
-    npcb.csc = stSL + sizeSt - 1;           // Запомнить вершину SL в контексте
-    
-    npcb.here = kdf;                        // HERE на начало буфера
-    npcb.context = cast(pp)kdf;             // Вектор context лежит в начале кодофайла
-    npcb.akdf = cast(pp)kdf;                // Указатель на кодофайл
-    npcb.Tib = cast(ps)&tib;                // Указатель на входной буфер текста
-    // npcb._Tib = cast(ps)&_tib;   // ??? не используется // Указатель на входной буфер WORD
-    npcb.In = cast(ps)&tib;                 // указатель смещения во входном буфере
-printf("--104--");
-    asm {
-        align 4;
-        // Сохраним регистры D
-        push EBX; push ESI; push EAX; push ECX; push EDX; push EBP; 
-        // --------------------
-        // В ESI запомним указатель на доп стек SL
-        lea EAX, npcb.csc.offsetof[npcb]; 
-        mov ESI,  DS:[EAX];
-        // Из контекста возьмем указатель на стек данных ...
-        lea EAX, npcb.csd.offsetof[npcb]; 
-        mov EAX,  DS:[EAX];
-        call SP_set; // ... и инициализируем его
-        mov EAX, ESI;   call LP_set; // Стек дополнительный для Форк
-        // Сохраним F
-        mov ECX, EBP;
-        pop EBP;
-        mov npcb.saveEAX.offsetof[npcb], EAX;
-        mov npcb.saveEBP.offsetof[npcb], ECX;  // Сохраним запомненный EBP
-        mov npcb.saveESI.offsetof[npcb], ESI;
-        mov npcb.saveEDI.offsetof[npcb], EDI;
-        // ----------------------
-        // Восстановим регистры D
-        pop EDX; pop ECX; pop EAX; pop ESI; pop EBX;
-    }
-printf("--105--");
-    gpcb = npcb;
-    // Надо выделить 256 CELL для хранения цепочек context
-    pb u = gpcb.here; for(int i; i != (256 * CELL); i++) *u = 0; 
-    gpcb.here = gpcb.here + (256 * CELL);
-    // Перенесём сюда определение HARD слов
-    CreateVocItem(cast(char*)"\3EXD".ptr,       cast(pp)&exec_D,        &gpcb.context);
-    CreateVocItem(cast(char*)"\6CALL_A".ptr,cast(pp)&callD,         &gpcb.context);
-    CreateVocItem(cast(char*)"\7CONTEXT".ptr,   cast(pp)&h_CONTEXT,     &gpcb.context);
-    CreateVocItem(cast(char*)"\4JUMP".ptr,      cast(pp)&f_JUMP,        &gpcb.context);
-    CreateVocItem(cast(char*)"\4EXIT".ptr,      cast(pp)&f_EXIT,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3NIP".ptr,       cast(pp)&SP_nip,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3ROT".ptr,       cast(pp)&SP_rot,        &gpcb.context);
-    CreateVocItem(cast(char*)"\6OSNAME".ptr,    cast(pp)&h_osname,  &gpcb.context);
-
-    CreateVocItem(cast(char*)"\10(STDOUT)".ptr,         cast(pp)&getSTDOUT,     &gpcb.context);
-
-    CreateVocItem(cast(char*)"\14LOADLIBRARYA".ptr,     cast(pp)&f_LoadLibraryA,    &gpcb.context);
-    CreateVocItem(cast(char*)"\10GPADRESS".ptr,     cast(pp)&f_GetPrAdressA,    &gpcb.context);
-    CreateVocItem(cast(char*)"\6DLOPEN".ptr,    cast(pp)&f_DlOpen,      &gpcb.context);
-    CreateVocItem(cast(char*)"\5DLSYM".ptr,     cast(pp)&f_DlSym,       &gpcb.context);
-
-    CreateVocItem(cast(char*)"\2L@".ptr,        cast(pp)&SL_get,        &gpcb.context);
-    CreateVocItem(cast(char*)"\2L+".ptr,        cast(pp)&SL_add,        &gpcb.context);
-    CreateVocItem(cast(char*)"\2>L".ptr,        cast(pp)&SL_toL,        &gpcb.context);
-    CreateVocItem(cast(char*)"\2L>".ptr,        cast(pp)&SL_Lfrom,      &gpcb.context);
-    CreateVocItem(cast(char*)"\4LDUP".ptr,      cast(pp)&SL_Ldup,       &gpcb.context);
-    CreateVocItem(cast(char*)"\5LDROP".ptr,     cast(pp)&SL_Ldrop,      &gpcb.context);
-    
-    CreateVocItem(cast(char*)"\3SP!".ptr,       cast(pp)&SP_set,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3SP@".ptr,       cast(pp)&SP_get,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3RP!".ptr,       cast(pp)&RP_set,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3RP@".ptr,       cast(pp)&RP_get,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3LP!".ptr,       cast(pp)&LP_set,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3LP@".ptr,       cast(pp)&LP_get,        &gpcb.context);
-//  CreateVocItem(cast(char*)"\2T5".ptr,        cast(pp)&t5,            &gpcb.context);
-//  CreateVocItem(cast(char*)"\3TCW".ptr,       cast(pp)&TestCompileWord, &gpcb.context);
-    CreateVocItem(cast(char*)"\5INT3,".ptr,         cast(pp)&h_INT3zpt,     &gpcb.context);
-    CreateVocItem(cast(char*)"\3<IN".ptr,       cast(pp)&h_IN,          &gpcb.context);
-    CreateVocItem(cast(char*)"\3TIB".ptr,       cast(pp)&h_TIB,         &gpcb.context);
-    CreateVocItem(cast(char*)"\5DLTIB".ptr,     cast(pp)&h_dlTib,       &gpcb.context);
-    CreateVocItem(cast(char*)"\4NOOP".ptr,      cast(pp)&f_NOOP,        &gpcb.context);
-
-    CreateVocItem(cast(char*)"\4DUMP".ptr,      cast(pp)&h_dump,        &gpcb.context);
-    CreateVocItem(cast(char*)"\5RDROP".ptr,     cast(pp)&SR_rdrop,  &gpcb.context);
-    CreateVocItem(cast(char*)"\2>R".ptr,        cast(pp)&h_toR,         &gpcb.context);
-    CreateVocItem(cast(char*)"\2R>".ptr,        cast(pp)&h_Rto,         &gpcb.context);
-    CreateVocItem(cast(char*)"\2R+".ptr,        cast(pp)&h_R_PLUS,      &gpcb.context);
-    CreateVocItem(cast(char*)"\2R@".ptr,        cast(pp)&h_R_get,       &gpcb.context);
-    CreateVocItem(cast(char*)"\2B,".ptr,        cast(pp)&h_Bzpt,        &gpcb.context);
-    CreateVocItem(cast(char*)"\4REF,".ptr,      cast(pp)&f_REFzpt,      &gpcb.context);
-    
-    CreateVocItem(cast(char*)"\5(LIT)".ptr,     cast(pp)&h_s_LIT_s,     &gpcb.context);
-    CreateVocItem(cast(char*)"\4RET,".ptr,      cast(pp)&h_RETzpt,      &gpcb.context);
-    // ????? CreateVocItem(cast(char*)"\4LIT,".ptr,     cast(pp)&h_LITzpt,      &gpcb.context);
-    CreateVocItem(cast(char*)"\4TUCK".ptr,      cast(pp)&h_TUCK,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3DUP".ptr,       cast(pp)&h_DUP,         &gpcb.context);
-    CreateVocItem(cast(char*)"\4SWAP".ptr,      cast(pp)&h_SWAP,        &gpcb.context);
-    CreateVocItem(cast(char*)"\4DROP".ptr,      cast(pp)&h_DROP,        &gpcb.context);
-    CreateVocItem(cast(char*)"\4OVER".ptr,      cast(pp)&h_OVER,        &gpcb.context);
-    CreateVocItem(cast(char*)"\1+".ptr,         cast(pp)&h_PLUS,        &gpcb.context);
-    CreateVocItem(cast(char*)"\1*".ptr,         cast(pp)&h_ZW,          &gpcb.context);
-    CreateVocItem(cast(char*)"\1-".ptr,         cast(pp)&h_MINUS,       &gpcb.context);
-    CreateVocItem(cast(char*)"\1=".ptr,         cast(pp)&f_RAWNO,       &gpcb.context);
-    CreateVocItem(cast(char*)"\2<>".ptr,        cast(pp)&f_NRAWNO,      &gpcb.context);
-    CreateVocItem(cast(char*)"\1<".ptr,         cast(pp)&f_MENSHE,      &gpcb.context);
-    CreateVocItem(cast(char*)"\1>".ptr,         cast(pp)&f_BOLSHE,      &gpcb.context);
-
-    CreateVocItem(cast(char*)("\2" ~ "1+").ptr,         cast(pp)&h_inc,         &gpcb.context);
-    CreateVocItem(cast(char*)("\2" ~ "1-").ptr,         cast(pp)&h_dec,         &gpcb.context);
-
-    CreateVocItem(cast(char*)"\4CELL".ptr,      cast(pp)&f_CELL,        &gpcb.context);
-    CreateVocItem(cast(char*)"\3REF".ptr,       cast(pp)&f_REF,         &gpcb.context);
-    CreateVocItem(cast(char*)"\5PLACE".ptr,     cast(pp)&h_PLACE,       &gpcb.context);
-    CreateVocItem(cast(char*)"\5ALLOT".ptr,     cast(pp)&h_ALLOT,       &gpcb.context);
-
-    // ========== Странные шитые слова =============
-    CreateVocItem(cast(char*)"\4TRUE".ptr,      cast(pp)&f_TRUE,        &gpcb.context);
-    CreateVocItem(cast(char*)"\5FALSE".ptr,     cast(pp)&f_FALSE,       &gpcb.context);
-    CreateVocItem(cast(char*)"\5STATE".ptr,     cast(pp)&h_STATE,       &gpcb.context);
-    CreateVocItem(cast(char*)"\3IMM".ptr,       cast(pp)&f_getIMM,      &gpcb.context);
-    CreateVocItem(cast(char*)"\2BL".ptr,        cast(pp)&f_BL,          &gpcb.context);
-    CreateVocItem(cast(char*)"\3CFL".ptr,       cast(pp)&f_CFL,         &gpcb.context);
-    CreateVocItem(cast(char*)"\5TOKEN".ptr,     cast(pp)&f_TOKEN,       &gpcb.context);
-    CreateVocItem(cast(char*)"\6TOKEN@".ptr,    cast(pp)&f_TOKEN_get,   &gpcb.context);
-    CreateVocItem(cast(char*)"\6TOKEN!".ptr,    cast(pp)&f_TOKEN_set,   &gpcb.context);
-    CreateVocItem(cast(char*)"\4WORD".ptr,      cast(pp)&f_word,        &gpcb.context);
-    CreateVocItem(cast(char*)"\4FIND".ptr,      cast(pp)&f_find,        &gpcb.context);
-    CreateVocItem(cast(char*)"\4HERE".ptr,      cast(pp)&h_HERE,        &gpcb.context);
-    CreateVocItem(cast(char*)"\6NUMBER".ptr,    cast(pp)&h_NUMBER,      &gpcb.context);
-    CreateVocItem(cast(char*)"\11COMMONADR".ptr,cast(pp)&h_COMMONADR,   &gpcb.context);
-    CreateVocItem(cast(char*)"\1.".ptr,         cast(pp)&h_tck,         &gpcb.context);
-    CreateVocItem(cast(char*)"\1[".ptr,         cast(pp)&h_COMP_OFF,    &gpcb.context, 1);
-    CreateVocItem(cast(char*)"\1]".ptr,         cast(pp)&h_COMP_ON,     &gpcb.context);
-    CreateVocItem(cast(char*)"\1:".ptr,         cast(pp)&h_dwoetoc,     &gpcb.context);
-    CreateVocItem(cast(char*)"\1;".ptr,         cast(pp)&h_tckzpt,      &gpcb.context, 1);
-    
-    // ========== kernel\vm\STC\BASE\memory.f =============
-    CreateVocItem(cast(char*)"\1@".ptr,         cast(pp)&h_getFromAdr,  &gpcb.context);
-    CreateVocItem(cast(char*)"\1!".ptr,         cast(pp)&h_setToAdr,    &gpcb.context);
-    CreateVocItem(cast(char*)"\2B@".ptr,        cast(pp)&h_getFromAdrByte,  &gpcb.context);
-    CreateVocItem(cast(char*)"\2B!".ptr,        cast(pp)&h_setToAdrByte,&gpcb.context);
-
-    // ========== kernel\vm\STC\BASE\  ...... ============= ссылки
-    CreateVocItem(cast(char*)"\5>MARK".ptr,     cast(pp)&f_R_MARK,      &gpcb.context);
-    CreateVocItem(cast(char*)"\5<MARK".ptr,     cast(pp)&f_L_MARK,      &gpcb.context);
-    CreateVocItem(cast(char*)"\10<RESOLVE".ptr, cast(pp)&f_L_RESOLVE,   &gpcb.context);
-    CreateVocItem(cast(char*)"\10RESOLVE>".ptr, cast(pp)&f_RESOLVE_R,   &gpcb.context);
-    CreateVocItem(cast(char*)"\7?BRANCH".ptr,   cast(pp)&f_ZW_BRANCH,   &gpcb.context);
-    CreateVocItem(cast(char*)"\6BRANCH".ptr,    cast(pp)&f_BRANCH,      &gpcb.context);
-    CreateVocItem(cast(char*)"\6LATEST".ptr,    cast(pp)&h_LATEST,      &gpcb.context);
-    CreateVocItem(cast(char*)"\5THROW".ptr,     cast(pp)&f_THROW,       &gpcb.context);
-    
-    // ========== Компиляция =============
-    CreateVocItem(cast(char*)"\1,".ptr,         cast(pp)&h_zpt,         &gpcb.context);
-    CreateVocItem(cast(char*)"\5JUMP,".ptr,         cast(pp)&h_JUMPzpt,     &gpcb.context);
-    CreateVocItem(cast(char*)"\10COMPILE,".ptr, cast(pp)&h_COMPILEzpt,  &gpcb.context);
-    CreateVocItem(cast(char*)"\7COMPILE".ptr,   cast(pp)&h_COMPILE,     &gpcb.context);
-    CreateVocItem(cast(char*)"\10(CREATE)".ptr, cast(pp)&f_s_CREATE_s,  &gpcb.context);
-
-    CreateVocItem(cast(char*)"\6CREATE".ptr,    cast(pp)&h_CREATE,      &gpcb.context);
-    CreateVocItem(cast(char*)"\7EXECUTE".ptr,   cast(pp)&f_EXECUTE,     &gpcb.context);
-
-    CreateVocItem(cast(char*)"\4TYPE".ptr,      cast(pp)&f_TYPE,        &gpcb.context);
-    CreateVocItem(cast(char*)"\10INCLUDED".ptr, cast(pp)&f_INCLUDED,    &gpcb.context);
-
-/*  // Проверим вектор context
-    pp[256]* vect = cast(pp[256]*)gpcb.context;
-    
-    writeln((*vect));
-    asm { int 3; }
- */ //    *cast(pp)(gpcb.here) = (*vect)[b1b];      // запись LFA, то что лежало в ячейке vect[69]
-printf("--106--");
-    // Работа со словарной статьёй
-    evalForth(": C@ B@ ; : C! B! ; : CFA>NFA DUP 6 - C@ 8 + - ; : CFA>LFA CELL - ; : NFA>LFA DUP C@ DUP + + ; : LFA>NFA CELL + CFA>NFA ; : NFA>CFA NFA>LFA CELL + ;");
-printf("--107--");
-
-
-}
 
 void initForth() {
 	kdf = cast(pb)(new uint[10000]).ptr;		// Изготовим кодофайл на 10000 адр
@@ -1848,6 +1638,7 @@ void initForth() {
 	CreateVocItem(cast(char*)"\1!".ptr, 		cast(pp)&h_setToAdr,	&gpcb.context);
 	CreateVocItem(cast(char*)"\2B@".ptr, 		cast(pp)&h_getFromAdrByte,	&gpcb.context);
 	CreateVocItem(cast(char*)"\2B!".ptr, 		cast(pp)&h_setToAdrByte,&gpcb.context);
+	CreateVocItem(cast(char*)"\5BMOVE".ptr, 	cast(pp)&f_bmove,       &gpcb.context);
 
 	// ========== kernel\vm\STC\BASE\  ...... ============= ссылки
 	CreateVocItem(cast(char*)"\5>MARK".ptr, 	cast(pp)&f_R_MARK,		&gpcb.context);
@@ -1977,7 +1768,7 @@ void f_word() {
 // CODE FIND - ( Astr -- Acfa/0 ) Найти в словаре CFA (если не нашли, то 0) 
 private ps h_find(ps s) {
 	char* str = s;
-	//printf("\n Start find [%s]  STATE = %d\n", s+1, gpcb.state);
+	// printf("\n Start find [%s]  STATE = %d\n", s+1, gpcb.state);
 
 	// Тут надо подумать. В этот момент context ulfa показывает на вектор
 	ubyte b1b = *(s + 1); 					// смещение в векторе context
@@ -1994,6 +1785,7 @@ private ps h_find(ps s) {
 			// ps cfa = _nfa + (*_nfa + 8);
 			// надо установвть глобальный признак IMM
 			gpcb.imm = *(_nfa + (*_nfa + 3));
+			// printf("-----> {%s}", _nfa+1);
 			return _nfa + (*_nfa + 8);
 		}
 		else {
