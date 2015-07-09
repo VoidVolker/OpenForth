@@ -10,6 +10,12 @@
 // includedForth(string NameFileForth) - Загрузить и выполнить файл Форта
 // pp asr = getCommonAdr(int n) - Вернуть из общей таблицы (ячейка n) значение
 // setCommonAdr(int n, pp adr) - Записать в ячейку общей таблицы n значение равное adr
+
+
+// История изменений
+// 28.06.15 - BMOVE Копировать байты 
+// 05.07.15 - Пропускать в поиске слова из одних цифр 
+// 06.07.15 - Добавил DDUP
  
 module forth;
 
@@ -1387,15 +1393,15 @@ private void f_bmove() {
 // программу
 private void h_THROW(int n) {
 	writeln();
-	writeln("[", n, "]", " THROW - ошибка, надо её искать ...");
+	writeln("[", n, "]", " THROW - error, this mast find ...");
 }
 private void f_THROW() {
 	asm {	naked;	call h_THROW;  call h_DROP;	ret; }
 }
 // ?COMP - разрешено только при компиляции 
-private void f_ZNW_COMP() {
-	asm {	naked;	call h_DUP; mov EAX, 1; call h_THROW;	ret; }
-}
+// private void f_ZNW_COMP() {
+//	asm {	naked;	call h_DUP; mov EAX, 1; call h_THROW;	ret; }
+// }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Выполнить адрес через EXECUTE
 extern (C) pp executeForth(pp adrexec, ubyte kolPar, ...) {
@@ -1543,13 +1549,18 @@ void initForth() {
 	gpcb.here = gpcb.here + (256 * CELL);
 	// Перенесём сюда определение HARD слов
 	CreateVocItem(cast(char*)"\3EXD".ptr, 		cast(pp)&exec_D, 		&gpcb.context);
-	CreateVocItem(cast(char*)"\6CALL_A".ptr,cast(pp)&callD, 		&gpcb.context);
+	CreateVocItem(cast(char*)"\6CALL_A".ptr,cast(pp)&callD, 			&gpcb.context);
 	CreateVocItem(cast(char*)"\7CONTEXT".ptr, 	cast(pp)&h_CONTEXT,		&gpcb.context);
 	CreateVocItem(cast(char*)"\4JUMP".ptr, 		cast(pp)&f_JUMP,		&gpcb.context);
 	CreateVocItem(cast(char*)"\4EXIT".ptr, 		cast(pp)&f_EXIT,		&gpcb.context);
 	CreateVocItem(cast(char*)"\3NIP".ptr, 		cast(pp)&SP_nip,		&gpcb.context);
 	CreateVocItem(cast(char*)"\3ROT".ptr, 		cast(pp)&SP_rot,		&gpcb.context);
-	CreateVocItem(cast(char*)"\6OSNAME".ptr, 	cast(pp)&h_osname,	&gpcb.context);
+	CreateVocItem(cast(char*)"\4-ROT".ptr, 		cast(pp)&SP_minusrot,	&gpcb.context);
+	CreateVocItem(cast(char*)"\3D>R".ptr, 		cast(pp)&SR_DtoR,		&gpcb.context);
+	CreateVocItem(cast(char*)"\3DR>".ptr, 		cast(pp)&SR_DRfrom,		&gpcb.context);
+//	CreateVocItem(cast(char*)"\5?COMP".ptr, 	cast(pp)&f_ZNW_COMP,		&gpcb.context);
+
+	CreateVocItem(cast(char*)"\6OSNAME".ptr, 	cast(pp)&h_osname,		&gpcb.context);
 
 	CreateVocItem(cast(char*)"\10(STDOUT)".ptr, 		cast(pp)&getSTDOUT, 	&gpcb.context);
 
@@ -1581,6 +1592,8 @@ void initForth() {
 
 	CreateVocItem(cast(char*)"\4DUMP".ptr, 		cast(pp)&h_dump, 		&gpcb.context);
 	CreateVocItem(cast(char*)"\5RDROP".ptr, 	cast(pp)&SR_rdrop,	&gpcb.context);
+	CreateVocItem(cast(char*)"\5DDROP".ptr, 	cast(pp)&SP_ddrop,	&gpcb.context);
+	CreateVocItem(cast(char*)"\4DDUP".ptr, 	    cast(pp)&SP_ddup,	&gpcb.context);
 	CreateVocItem(cast(char*)"\2>R".ptr, 		cast(pp)&h_toR, 		&gpcb.context);
 	CreateVocItem(cast(char*)"\2R>".ptr, 		cast(pp)&h_Rto, 		&gpcb.context);
 	CreateVocItem(cast(char*)"\2R+".ptr, 		cast(pp)&h_R_PLUS, 		&gpcb.context);
@@ -1711,8 +1724,19 @@ void initForth() {
 	evalForth(": IF=W OSNAME 76 = IF TIB @ DLTIB + <IN ! THEN ; IMMEDIATE");
 	evalForth(": IF=L OSNAME 87 = IF TIB @ DLTIB + <IN ! THEN ; IMMEDIATE");
 	evalForth(": NOT IF FALSE ELSE TRUE THEN ;");
+	// Проверить, что мы в режиме компиляции или интерпретации
+	evalForth(": ?COMP STATE NOT IF 1 THROW THEN ; : ?EXEC STATE IF 2 THROW THEN ;");
+	// ( -- ) Забрать из потока слово немедленного исполнения и закомпилировать его
+	evalForth(": [COMPILE] ?COMP ' COMPILE, ; IMMEDIATE");
 	// EXECUTEFROMD ( Asr -- Rez ) Выполнить из D слово по EXECUTE
 	evalForth(": EXECUTEFROMD DUP >R CELL + @ BEGIN DUP WHILE DUP CELLS CELL R@ + + @ SWAP 1- REPEAT DROP R> @ EXECUTE ;");
+	// Счетный цикл 10 0 DO .. I .. LOOP - 10 раз от 0 до 9 - в любом случае 1 раз выполнение
+	// Для работы использует стек L
+	evalForth(": (DO) SWAP >L >L ; : DO COMPILE (DO) <MARK ; IMMEDIATE : I L@ ;");
+	evalForth(": (LOOP) L> 1+ L> DDUP < NOT IF DDROP TRUE ELSE >L >L FALSE THEN ;");
+	evalForth(": LOOP COMPILE (LOOP) COMPILE ?BRANCH <RESOLVE ; IMMEDIATE");
+	evalForth(": (+LOOP) L> + L> DDUP < NOT IF DDROP TRUE ELSE >L >L FALSE THEN ;");
+	evalForth(": +LOOP COMPILE (+LOOP) COMPILE ?BRANCH <RESOLVE ; IMMEDIATE");
 	gpcb.executeFromD = gpcb.latest; // Сохраним адрес EXECUTEFROMD
 }
 // CODE WORD ( Rz -- A/0) Выдать адрес на начало следующей лексемы в формате
@@ -1769,13 +1793,18 @@ void f_word() {
 private ps h_find(ps s) {
 	char* str = s;
 	// printf("\n Start find [%s]  STATE = %d\n", s+1, gpcb.state);
+	ps _nfa; pp[256]* vect; ubyte b1b;
+	// Надо проверить, может это число? Если строго в строке одни цифры, то пропускаем и не ищем в словаре
+	char* ss = s + 1; bool isNoDig = false;
+	for(; *ss != 0; ss++) { if( !((*ss > 47) && (*ss < 58)) ) { isNoDig = true;  break; }  }
+	if(!isNoDig) { goto kn; }
 
 	// Тут надо подумать. В этот момент context ulfa показывает на вектор
-	ubyte b1b = *(s + 1); 					// смещение в векторе context
-	pp[256]* vect = cast(pp[256]*)gpcb.context;
+	b1b = *(s + 1); 					// смещение в векторе context
+	vect = cast(pp[256]*)gpcb.context;
     // *cast(pp)(gpcb.here) = (*vect)[b1b];		// запись LFA, то что лежало в ячейке vect[69]
 	// было ---> ps _nfa = cast(ps)gpcb.context;
-	ps _nfa = cast(ps)(*vect)[b1b];
+	_nfa = cast(ps)(*vect)[b1b];
 	for(;;) {
 		kolPer++;
 		if(_nfa == null) goto kn;
